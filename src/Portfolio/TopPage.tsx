@@ -32,6 +32,8 @@ function classNames(...classes: string[]) {
 
 export default function TopPage() {
 
+  const [visitorCount, setVisitorCount] = useState(null);
+
   const icons: { [key: string]: JSX.Element } = {
     InboxIcon: <InboxIcon className="h-6 w-6 text-white" aria-hidden="true" />,
     CodeBracketSquareIcon: <CodeBracketSquareIcon className="h-6 w-6 text-white" aria-hidden="true" />,
@@ -44,6 +46,13 @@ export default function TopPage() {
     console.log("Captcha value:", value);
     setCaptchaValue(value);
   };
+  const recaptchaRef = useRef<ReCAPTCHA>(null);
+
+  const resetCaptcha = () => {
+    if (recaptchaRef.current) {
+      recaptchaRef.current.reset();
+    }
+  }
 
   //ヘッダーコントロール
   const [lastScrollY, setLastScrollY] = useState(0);
@@ -121,48 +130,110 @@ export default function TopPage() {
   };
 
   //メール送信
+  // const sendEmail = () => {
+  //   if (!formData) return;
+  //   const formDataAsRecord: Record<string, unknown> = {
+  //     sei: formData.sei,
+  //     mei: formData.mei,
+  //     email: formData.email,
+  //     company: formData.company,
+  //     tel: formData.tel,
+  //     message: formData.message,
+  //   };
+
+  //   emailjs.send(process.env.REACT_APP_CONTACT_SERVICE_ID as string, process.env.REACT_APP_CONTACT_TEMPLATE_ID as string, formDataAsRecord, process.env.REACT_APP_CONTACT_USER_ID as string)
+  //     .then((result) => {
+  //       console.log('送信できた!', result.text);
+  //       setContactConfirmShow(true);
+  //       reset();
+  //     }, (error) => {
+  //       console.log('Failed to send email:', error.text);
+  //       setContactConfirmShow(false);
+  //     }).finally(() => {
+  //       setContactDialogOpen(false);
+  //     });
+  // };
+
   const sendEmail = () => {
     if (!formData) return;
-    const formDataAsRecord: Record<string, unknown> = {
-      sei: formData.sei,
-      mei: formData.mei,
-      email: formData.email,
-      company: formData.company,
-      tel: formData.tel,
-      message: formData.message,
-    };
 
-    emailjs.send(process.env.REACT_APP_CONTACT_SERVICE_ID as string, process.env.REACT_APP_CONTACT_TEMPLATE_ID as string, formDataAsRecord, process.env.REACT_APP_CONTACT_USER_ID as string)
-      .then((result) => {
-        console.log('送信できた!', result.text);
-        setContactConfirmShow(true);
-        reset();
-      }, (error) => {
-        console.log('Failed to send email:', error.text);
-        setContactConfirmShow(false);
-      }).finally(() => {
-        setContactDialogOpen(false);
-      });
-  };
+    fetch('${process.env.REACT_APP_MY_EMAIL_URL}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            sei: formData.sei,
+            mei: formData.mei,
+            email: formData.email,
+            company: formData.company,
+            message: formData.message
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === "success") {
+            console.log('Email sent successfully');
+            setContactConfirmShow(true);
+            reset();
+            resetCaptcha();
+            setContactDialogOpen(false);
+        } else {
+            console.log('Failed to send email');
+            setContactConfirmShow(false);
+        }
+    })
+    .catch(error => console.error('Error sending email:', error));
+};
 
   const handleConfirmSend = () => {
-    sendEmail();
+    const verifyCaptcha = async () => {
+      try {
+        const response = await fetch('${process.env.REACT_APP_MY_RECAPTCHA_URL}', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: `g-recaptcha-response=${captchaValue}`
+        });
+        const data = await response.json();
+        if (data.success) {
+          sendEmail();
+        } else {
+          console.error('reCAPTCHA検証に失敗しました:', data.message);
+        }
+      } catch (error) {
+        console.error('reCAPTCHAの検証中にエラーが発生しました:', error);
+      }
+    };
+  
+    verifyCaptcha();
   };
   const handleCancel = () => {
     setContactDialogOpen(false);
   };
 
+  useEffect(() => {
+    if (show) {
+      const timer = setTimeout(() => {
+        setContactConfirmShow(false);
+      }, 5000);
+  
+      return () => clearTimeout(timer); 
+    }
+  }, [show]);
+
   const [isPrivacyDialogOpen, setIsPrivacyDialogOpen] = useState(false);
 
   //ローディング
-  const [isLoading, setIsLoading] = useState(true);
+  // const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 2300);
-    return () => clearTimeout(timer);
-  }, []);
+  // useEffect(() => {
+  //   const timer = setTimeout(() => {
+  //     setIsLoading(false);
+  //   }, 2300);
+  //   return () => clearTimeout(timer);
+  // }, []);
 
   //星
   interface Skill {
@@ -183,19 +254,51 @@ export default function TopPage() {
 
   //プライバシー
   useEffect(() => {
-    if (!isLoading) {
-      setIsPrivacyDialogOpen(true);
-    }
-  }, [isLoading]);
+    // if (!isLoading) {
+        if (!localStorage.getItem('visited')) {
+            setIsPrivacyDialogOpen(true);
+            localStorage.setItem('visited', 'true');
 
-  if (isLoading) {
-    return (
-      <div className="loading-container" style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh' }}>
-        <ReactLoading type="spin" color="white" width={150} height={150} />
-        <h1 className='absolute text-xl text-white'>ロード中</h1>
-      </div>
-    );
-  }
+            fetch('${process.env.REACT_APP_MY_VISITORS_URL}', {
+                method: 'GET',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log(data);
+                setVisitorCount(data.count);
+            })
+            .catch(error => console.error('Error:', error));
+        } else {
+            fetch('${process.env.REACT_APP_MY_NOT_VISITORS_URL}', {
+                method: 'GET',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log(data);
+                setVisitorCount(data.count);
+            })
+            .catch(error => console.error('Error:', error));
+        }
+  });
+      // }
+  // }, [isLoading]);
+
+  // if (isLoading) {
+  //   return (
+  //     <div className="loading-container" style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', zIndex: 1000000000 }}>
+  //       <ReactLoading type="spin" color="white" width={150} height={150} />
+  //       <h1 className='absolute text-xl text-white'>ロード中</h1>
+  //     </div>
+  //   );
+  // }
   
   return (
 
@@ -210,7 +313,7 @@ export default function TopPage() {
             <div>
               <button onClick={scrollToTop} className='flex align-left'>
                 {MyProfile.map((item) => (
-                <img src={item.headerimageUrl} alt="トップページへ" className='md:w-1/2 lg:w-4/6 ml-2' />
+                <img key={item.title} src={item.headerimageUrl} alt="トップページへ" className='md:w-1/2 lg:w-4/6 ml-2' />
                 ))}
               </button>
             </div>
@@ -219,6 +322,7 @@ export default function TopPage() {
                 <div className="flex space-x-4">
                   {NavMenuItem.map((item) => (
                   <Link
+                    key={item.name}
                     to={item.to}
                     smooth={true}
                     duration={item.duration}
@@ -250,6 +354,7 @@ export default function TopPage() {
           <div className="space-y-1 px-2 pb-3 pt-1">
             {NavMenuItem.map((item) => (
               <Link
+                key={item.name}
                 to={item.to}
                 smooth={true}
                 duration={item.duration}
@@ -268,7 +373,7 @@ export default function TopPage() {
     {/* プライバシー */}
 
     <Transition.Root show={isPrivacyDialogOpen} as={Fragment}>
-      <Dialog as="div" className="relative z-10" onClose={() => setIsPrivacyDialogOpen(false)}>
+      <Dialog as="div" className="relative z-10" onClose={() => {}}>
         <Transition.Child
           as={Fragment}
           enter="ease-out duration-300"
@@ -359,7 +464,7 @@ export default function TopPage() {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <p className="lg:text-lg leading-6 text-blue-700 blinking-text">
         {MyProfile.map((item) => (
-          <strong className="font-semibold">{item.bannerDescription}</strong>
+          <strong key={item.title} className="font-semibold">{item.bannerDescription}</strong>
         ))}
       </p>
     </div>
@@ -371,7 +476,7 @@ export default function TopPage() {
 
   <div className='flex'>
     {MyProfile.map((item) => (
-      <img src={item.dinamicimageUrl} alt="description" />
+      <img key={item.title} src={item.dinamicimageUrl} alt="description" className='w-full' />
     ))}
   </div>
   <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
@@ -382,10 +487,11 @@ export default function TopPage() {
       <div className="mt-6 sm:flex sm:min-w-0 sm:flex-1 sm:items-center sm:justify-end sm:space-x-6 sm:pb-1">
         <div className="mt-6 min-w-0 flex-1 sm:hidden md:block">
           {MyProfile.map((item) => (
-            <h1 className="truncate text-3xl font-bold text-white">{item.title}</h1>
+            <h1 key={item.title} className="truncate text-3xl font-bold text-white">{item.title}</h1>
           ))}
         </div>
         <div className="mt-5 flex justify-center space-x-10">
+        <p className='text-white'>Page Views: {Math.floor(visitorCount ?? 0)}</p>
           {SocialIcon.Social.map((item) => (
             <a key={item.name} href={item.href} target='blank' className="text-white hover:text-gray-500">
               <span className="sr-only">{item.name}</span>
@@ -397,7 +503,7 @@ export default function TopPage() {
     </div>
     <div className='mt-10 text-white'>
       {MyProfile.map((item) => (
-        <p>
+        <p key={item.title}>
           {item.description}
         </p>
       ))}
@@ -409,11 +515,11 @@ export default function TopPage() {
   <div className="py-0 sm:py-0 bg-gray-800">
     <div className="mx-auto max-w-7xl px-6 lg:px-8 pb-10">
       <div className="mx-auto mt-16 grid max-w-2xl grid-cols-1 gap-x-8 gap-y-20 lg:mx-0 lg:max-w-none lg:grid-cols-3">
-      {SliderItem1.map((item, index) => (
-        <div key={index}>
+      {SliderItem1.map((item) => (
+        <div key={item.title}>
            <Slider {...SliderSetting}>
-            {item.images.map((image, index) => (
-              <div key={index} className="relative w-full">
+            {item.images.map((image) => (
+              <div key={image} className="relative w-full">
                 <img src={image} alt="Slide image" loading="lazy" className="aspect-[13/9] w-full bg-gray-100 object-cover sm:aspect-[13/9] lg:aspect-[13/9]" />
               </div>
             ))}
@@ -423,17 +529,22 @@ export default function TopPage() {
             <p className="mt-5 leading-6 text-white">{item.description}</p>
             <div className="mt-5 flex flex-wrap">
               {item.badges.map((badge, index) => (
-                <span key={index} className={`${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
+                <span key={index} className="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-sm font-medium text-white ring-1 ring-inset ring-gray-800">
+                  <svg className={`h-1.5 w-1.5 ${badge.color}`} viewBox="0 0 6 6" aria-hidden="true">
+                    <circle cx="3" cy="3" r="3" />
+                  </svg>
+                  {badge.label}
+                </span>
               ))}
             </div>
           </div>
         </div>
       ))}
-      {SliderItem2.map((item, index) => (
-        <div key={index}>
+      {SliderItem2.map((item) => (
+        <div key={item.title}>
           <Slider {...SliderSetting}>
-            {item.images.map((image, index) => (
-              <div key={index} className="relative w-full">
+            {item.images.map((image) => (
+              <div key={image} className="relative w-full">
                 <img src={image} alt="Slide image" loading="lazy" className="aspect-[13/9] w-full bg-gray-100 object-cover sm:aspect-[13/9] lg:aspect-[13/9]" />
               </div>
             ))}
@@ -443,17 +554,22 @@ export default function TopPage() {
             <p className="mt-5 leading-6 text-white">{item.description}</p>
             <div className="mt-5 flex flex-wrap">
               {item.badges.map((badge, index) => (
-                <span key={index} className={`${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
+                <span key={index} className="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-sm font-medium text-white ring-1 ring-inset ring-gray-800">
+                  <svg className={`h-1.5 w-1.5 ${badge.color}`} viewBox="0 0 6 6" aria-hidden="true">
+                    <circle cx="3" cy="3" r="3" />
+                  </svg>
+                  {badge.label}
+                </span>
               ))}
             </div>
           </div>
         </div>
       ))}
-      {SliderItem3.map((item, index) => (
-        <div key={index}>
+      {SliderItem3.map((item) => (
+        <div key={item.title}>
           <Slider {...SliderSetting}>
-            {item.images.map((image, index) => (
-              <div key={index} className="relative w-full">
+            {item.images.map((image) => (
+              <div key={image} className="relative w-full">
                 <img src={image} alt="Slide image" loading="lazy" className="aspect-[13/9] w-full bg-gray-100 object-cover sm:aspect-[13/9] lg:aspect-[13/9]" />
               </div>
             ))}
@@ -463,7 +579,12 @@ export default function TopPage() {
             <p className="mt-5 leading-6 text-white">{item.description}</p>
             <div className="mt-5 flex flex-wrap">
               {item.badges.map((badge, index) => (
-                <span key={index} className={`${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
+                <span key={index} className="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-sm font-medium text-white ring-1 ring-inset ring-gray-800">
+                  <svg className={`h-1.5 w-1.5 ${badge.color}`} viewBox="0 0 6 6" aria-hidden="true">
+                    <circle cx="3" cy="3" r="3" />
+                  </svg>
+                  {badge.label}
+                </span>
               ))}
             </div>
           </div>
@@ -482,7 +603,7 @@ export default function TopPage() {
       <div className="mx-auto mt-16 max-w-none lg:mt-24">
         <div className="grid grid-cols-1 gap-x-8 gap-y-16 lg:grid-cols-3">
           {ActivityItem.map((item) => (
-            <div className="flex flex-col">
+            <div key={item.title} className="flex flex-col">
               <div className="mb-6 flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600">
                  {icons[item.icon]}
               </div>
@@ -493,9 +614,14 @@ export default function TopPage() {
                 <p className="flex-auto text-white">{item.description}</p>
               </div>
               <div className="mt-5 flex flex-wrap">
-                {item.badges.map((badge, bIndex) => (
-                  <span key={bIndex} className={`mt-1 ${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
-                ))}
+              {item.badges.map((badge, index) => (
+                <span key={index} className="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-sm font-medium text-white ring-1 ring-inset ring-gray-800">
+                  <svg className={`h-1.5 w-1.5 ${badge.color}`} viewBox="0 0 6 6" aria-hidden="true">
+                    <circle cx="3" cy="3" r="3" />
+                  </svg>
+                  {badge.label}
+                </span>
+              ))}
               </div>
             </div>
           ))}
@@ -512,7 +638,7 @@ export default function TopPage() {
       <h2 className="mt-10 text-3xl font-bold tracking-tight text-white sm:text-4xl text-center">Blog</h2>
       <div className="mx-auto mt-16 max-w-none lg:mt-24">
       {BlogProfile.map((item) => (
-        <div className="flex items-start space-x-5">
+        <div key={item.title} className="flex items-start space-x-5">
           <div className="flex-shrink-0">
             <div className="relative group overflow-hidden">
               <a href={process.env.REACT_APP_MY_BLOG_URL} target='blank' rel="noopener noreferrer">
@@ -534,45 +660,43 @@ export default function TopPage() {
         ))}
       </div>
       {SmallTitle.map((item) => (
-      <h1 className="mt-10 text-2xl font-bold tracking-tight text-white sm:text-2xl">
+      <h1 key={item.title} className="mt-10 text-2xl font-bold tracking-tight text-white sm:text-2xl">
         {item.title}
       </h1>
       ))}
       <div className="mx-auto mt-10 grid max-w-2xl grid-cols-1 gap-x-8 gap-y-20 lg:mx-0 lg:max-w-none lg:grid-cols-3">
         {BlogPost.map((post) => (
-        <a href={post.href} target='_brank' key={post.id} className="group flex flex-col items-start justify-between transition duration-300 ease-in-out group-hover:opacity-75">
-          <div className="relative w-full">
-            <div className="aspect-h-1 aspect-w-1 w-full overflow-hidden bg-gray-200">
-              <a href={post.href} target="_blank" rel="noopener noreferrer">
-                <img
-                  src={post.imageUrl}
-                  alt=""
-                  className="h-full w-full object-cover object-center transition duration-300 ease-in-out group-hover:opacity-75"
-                />
-              </a>
+        <div
+        key={post.id}
+        className="group flex flex-col items-start justify-between transition duration-300 ease-in-out group-hover:opacity-75 cursor-pointer"
+        onClick={() => window.open(post.href, '_blank')}
+      >
+        <div className="relative w-full">
+          <div className="aspect-h-1 aspect-w-1 w-full overflow-hidden bg-gray-200">
+            <img
+              src={post.imageUrl}
+              alt=""
+              className="h-full w-full object-cover object-center transition duration-300 ease-in-out group-hover:opacity-75"
+            />
+          </div>
+        </div>
+        <div className="max-w-xl">
+          <div className="mt-8 flex items-center gap-x-4 text-xs">
+            <time className="text-white group-hover:text-gray-500">
+              {post.date}
+            </time>
+            <div
+              className="relative z-10 rounded-full bg-gray-50 px-3 py-1.5 font-medium text-gray-900 group-hover:bg-gray-500"
+            >
+              {post.category}
             </div>
           </div>
-          <div className="max-w-xl">
-            <div className="mt-8 flex items-center gap-x-4 text-xs">
-              <time className="text-white group-hover:text-gray-500">
-                {post.date}
-              </time>
-              <a
-                className="relative z-10 rounded-full bg-gray-50 px-3 py-1.5 font-medium text-gray-900 group-hover:bg-gray-500"
-              >
-                {post.category}
-              </a>
-            </div>
-            <div className="group relative">
-              <h3 className="mt-3 text-lg font-semibold leading-6 text-white group-hover:text-gray-500">
-                <a href={post.href} target='blank'>
-                  {post.title}
-                </a>
-              </h3>
-              <p className="mt-5 line-clamp-2 text-sm leading-6 text-white group-hover:text-gray-500">{post.description}</p>
-            </div>
-          </div>
-        </a> 
+          <h3 className="mt-3 text-lg font-semibold leading-6 text-white group-hover:text-gray-500">
+            {post.title}
+          </h3>
+          <p className="mt-5 line-clamp-2 text-sm leading-6 text-white group-hover:text-gray-500">{post.description}</p>
+        </div>
+      </div>      
         ))}
       </div>
     <hr className="border-b border-8 border-dashed border-gray-700 mt-20" />
@@ -586,81 +710,103 @@ export default function TopPage() {
       <h2 className="mt-10 text-3xl font-bold tracking-tight text-white sm:text-4xl mb-20 text-center">Internship</h2>
       <div className="mx-auto mt-16 max-w-none lg:mt-24">
         <div className="mx-auto">
-          {InternshipProfile.map((item) => (
-            <div className=''>
-              <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-2xl">
-                {item.title}
-              </h1>
-              <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
-                <div>
-                  <p>
-                    {item.duration}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-          <div className="mt-10 mx-auto">
-            {InternshipItem1.map((item) => (
-              <article className="relative isolate flex flex-col gap-8 lg:flex-row">
-                <div className="relative aspect-[13/9] sm:aspect-[13/9] lg:w-80 lg:shrink-0 ">
-                  <img
-                    src={item.image}
-                    alt=""
-                    className="absolute inset-0 h-full w-full bg-gray-50 object-cover"
-                  />
-                  <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-gray-900/10" />
-                </div>
-                <div>
-                  <div className="">
-                    <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-2xl">
-                      {item.title}
-                    </h1>
-                    <p className='mb-2 mt-2 text-white'>{item.duration}</p>
-                    <div className="flex flex-wrap">
-                      {item.badges.map((badge, bIndex) => (
-                        <span key={bIndex} className={`mt-1 ${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
-                      ))}
-                    </div>
-                    <p className="mt-3 leading-6 text-white">
-                      {item.description}
+        </div>
+        {InternshipItem1.map((item) => (
+          <div key={item.title} className="bg-gray-800 pb-20 sm:pb-10">
+            <div className="mx-auto max-w-7xl">
+              <div className="mx-auto max-w-2xl lg:mx-0 lg:max-w-none">
+                <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-2xl">{item.title}</h1>
+                <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
+                  <div>
+                    <p>
+                      {item.duration}
                     </p>
                   </div>
                 </div>
-              </article>
-            ))}
-          </div>
-        </div>
-        <div className="mt-10 mx-auto">
-          {InternshipItem2.map((item) => (
-            <article className="relative isolate flex flex-col gap-8 lg:flex-row">
-              <div className="relative aspect-[13/9] sm:aspect-[13/9] lg:w-80 lg:shrink-0 ">
-                <img
-                  src={item.image}
-                  alt=""
-                  className="absolute inset-0 h-full w-full bg-gray-50 object-cover"
-                />
-                <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-gray-900/10" />
-              </div>
-              <div>
-                <div className="">
-                  <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-2xl">
-                    {item.title}
-                  </h1>
-                  <p className='mb-2 mt-2 text-white'>{item.duration}</p>
-                  <div className="flex flex-wrap">
-                    {item.badges.map((badge, bIndex) => (
-                      <span key={bIndex} className={`mt-1 ${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
-                    ))}
+                <div className=''>
+                  <div className="relative overflow-hidden pt-5 lg:pt-10">
+                    <div className="mx-auto max-w-7xl px-6 lg:px-8">
+                      <img
+                        className="mb-[-1%] rounded-xl shadow-2xl ring-1 ring-gray-900/10"
+                        src={item.image}
+                        loading="lazy"
+                        alt="画像"
+                      />
+                      <div className="relative" aria-hidden="true">
+                        <div className="absolute -inset-x-20 bottom-0 bg-gradient-to-t from-gray-700 pt-[7%]" />
+                      </div>
+                    </div>
                   </div>
-                  <p className="mt-5 leading-6 text-white">
-                    {item.description}
-                  </p>
+                  <div className="mt-5 flex flex-wrap">
+                  {item.badges.map((badge, index) => (
+                    <span key={index} className="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-sm font-medium text-white ring-1 ring-inset ring-gray-800">
+                      <svg className={`h-1.5 w-1.5 ${badge.color}`} viewBox="0 0 6 6" aria-hidden="true">
+                        <circle cx="3" cy="3" r="3" />
+                      </svg>
+                      {badge.label}
+                    </span>
+                  ))}
+                  </div>
+                  <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
+                    <div>
+                      <p>
+                        {item.description}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </article>
-          ))}
-        </div>
+            </div>
+          </div>
+        ))}
+        {InternshipItem2.map((item) => (
+          <div key={item.title} className="bg-gray-800">
+            <div className="mx-auto max-w-7xl">
+              <div className="mx-auto max-w-2xl lg:mx-0 lg:max-w-none">
+                <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-2xl">{item.title}</h1>
+                <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
+                  <div>
+                    <p>
+                      {item.duration}
+                    </p>
+                  </div>
+                </div>
+                <div className=''>
+                  <div className="relative overflow-hidden pt-5 lg:pt-10">
+                    <div className="mx-auto max-w-7xl px-6 lg:px-8">
+                      <img
+                        className="mb-[-1%] rounded-xl shadow-2xl ring-1 ring-gray-900/10"
+                        src={item.image}
+                        loading="lazy"
+                        alt="画像"
+                      />
+                      <div className="relative" aria-hidden="true">
+                        <div className="absolute -inset-x-20 bottom-0 bg-gradient-to-t from-gray-700 pt-[7%]" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-5 flex flex-wrap">
+                  {item.badges.map((badge, index) => (
+                    <span key={index} className="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-sm font-medium text-white ring-1 ring-inset ring-gray-800">
+                      <svg className={`h-1.5 w-1.5 ${badge.color}`} viewBox="0 0 6 6" aria-hidden="true">
+                        <circle cx="3" cy="3" r="3" />
+                      </svg>
+                      {badge.label}
+                    </span>
+                  ))}
+                  </div>
+                  <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
+                    <div>
+                      <p>
+                        {item.description}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
       <hr className="border-b border-8 border-dashed border-gray-700 mt-20" />
     </div>
@@ -675,7 +821,7 @@ export default function TopPage() {
   </div>
 
   {ServicesItem1.map((item) => (
-  <div className="bg-gray-800 pb-20 sm:pb-10">
+  <div key={item.title} className="bg-gray-800 pb-20 sm:pb-10">
     <div className="mx-auto max-w-7xl px-6 lg:px-8">
       <div className="mx-auto max-w-2xl lg:mx-0 lg:max-w-none">
         <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-2xl">{item.title}</h1>
@@ -701,8 +847,13 @@ export default function TopPage() {
             </div>
           </div>
           <div className="mt-5 flex flex-wrap">
-            {item.badges.map((badge, bIndex) => (
-              <span key={bIndex} className={`mt-1 ${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
+            {item.badges.map((badge, index) => (
+              <span key={index} className="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-sm font-medium text-white ring-1 ring-inset ring-gray-800">
+                <svg className={`h-1.5 w-1.5 ${badge.color}`} viewBox="0 0 6 6" aria-hidden="true">
+                  <circle cx="3" cy="3" r="3" />
+                </svg>
+                {badge.label}
+              </span>
             ))}
           </div>
           <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
@@ -740,62 +891,8 @@ export default function TopPage() {
   </div>
   ))}
 
-  {ServicesItem2.map((item) => (
-  <div className="bg-gray-800 py-20 sm:py-10">
-    <div className="mx-auto max-w-7xl px-6 lg:px-8">
-      <div className="mx-auto max-w-2xl lg:mx-0 lg:max-w-none">
-        <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-2xl">{item.title}</h1>
-        <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
-          <div>
-            <p>
-              {item.comment}
-            </p>
-          </div>
-        </div>
-        <div className=''>
-          <div className="relative overflow-hidden pt-5 lg:pt-10">
-            <div className="mx-auto max-w-7xl px-6 lg:px-8">
-              <img
-                className="mb-[-1%] rounded-xl shadow-2xl ring-1 ring-gray-900/10"
-                src={item.imageUrl}
-                loading="lazy"
-                alt="画像"
-              />
-              <div className="relative" aria-hidden="true">
-                <div className="absolute -inset-x-20 bottom-0 bg-gradient-to-t from-gray-700 pt-[7%]" />
-              </div>
-            </div>
-          </div>
-          <div className="mt-5 flex flex-wrap">
-            {item.badges.map((badge, bIndex) => (
-              <span key={bIndex} className={`mt-1 ${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
-            ))}
-          </div>
-          <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
-            <div>
-              <p>
-                {item.description}
-              </p>
-            </div>
-          </div>
-          <div className="mt-10 flex">
-            <a
-              target='branck'
-              href={item.githubUrl}
-              className="inline-flex justify-center rounded-md bg-gray-700 px-3 py-2 text-sm font-semibold text-white shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-white hover:bg-opacity-40"
-            >
-              <FaGithub className="-ml-0.5 mr-1.5 h-5 w-5 text-white" aria-hidden="true" />
-              <span>GitHub</span>
-            </a>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  ))}
-
   {ServicesItem3.map((item) => (
-  <div className="bg-gray-800 py-20 sm:py-10">
+  <div key={item.title} className="bg-gray-800 py-20 sm:py-10">
     <div className="mx-auto max-w-7xl px-6 lg:px-8">
       <div className="mx-auto max-w-2xl lg:mx-0 lg:max-w-none">
         <h1 className="mt-2 text-2xl font-bold tracking-tight text-white sm:text-2xl">{item.title}</h1>
@@ -821,8 +918,13 @@ export default function TopPage() {
             </div>
           </div>
           <div className="mt-5 flex flex-wrap">
-            {item.badges.map((badge, bIndex) => (
-              <span key={bIndex} className={`mt-1 ${badge.color} text-white font-semibold mr-2 px-2.5 py-0.5 rounded`}>{badge.label}</span>
+            {item.badges.map((badge, index) => (
+              <span key={index} className="inline-flex items-center gap-x-1.5 rounded-md px-2 py-1 text-sm font-medium text-white ring-1 ring-inset ring-gray-800">
+                <svg className={`h-1.5 w-1.5 ${badge.color}`} viewBox="0 0 6 6" aria-hidden="true">
+                  <circle cx="3" cy="3" r="3" />
+                </svg>
+                {badge.label}
+              </span>
             ))}
           </div>
           <div className="mt-5 grid max-w-xl grid-cols-1 gap-8 text-base leading-7 text-white lg:max-w-none lg:grid-cols-1">
@@ -848,6 +950,7 @@ export default function TopPage() {
           </div>
         </div>
       </div>
+      <hr className="border-b border-8 border-dashed border-gray-700 mt-20" />
     </div>
   </div>
   ))}
@@ -976,7 +1079,7 @@ export default function TopPage() {
       <h2 className="mt-10 text-3xl font-bold tracking-tight text-white sm:text-4xl text-center">Instagram</h2>
       <div className="mx-auto mt-16 max-w-none lg:mt-24">
         {InstagramProfile.map((item) => (
-          <div className="flex items-start space-x-5">
+          <div key={item.url} className="flex items-start space-x-5">
             <div className="flex-shrink-0">
               <div className="relative group overflow-hidden">
                 <a href={item.url} target='blank' rel="noopener noreferrer">
@@ -990,7 +1093,7 @@ export default function TopPage() {
               </div>
             </div>
             <div className="pt-1.5">
-              <h1 className="text-2xl font-bold text-white"><a href='https://www.instagram.com/ao_realstudent/' target='blank' className='hover:text-gray-500'>{item.title}</a></h1>
+              <h1 className="text-2xl font-bold text-white"><a href='${REACT_APP_MY_INSTAGRAM_URL}' target='blank' className='hover:text-gray-500'>{item.title}</a></h1>
               <p className="text-sm font-medium text-white">
                 {item.description}
               </p>
@@ -1132,6 +1235,7 @@ export default function TopPage() {
         </div>
         {/* スパム */}
         <ReCAPTCHA
+          ref={recaptchaRef}
           sitekey="6LcslaspAAAAAA15eqFJy4_vL856A7uu4ANjeqId"
           onChange={onChange}
           className='mt-3'
@@ -1282,8 +1386,9 @@ export default function TopPage() {
     <div className="pt-10 mx-auto max-w-7xl overflow-hidden px-6 py-5 sm:py-10 lg:px-8">
       <nav className="-mb-6 columns-2 sm:flex sm:justify-center sm:space-x-12" aria-label="Footer">
         {NavMenuItem.map((item) => (
-          <div className="pb-6 text-center">
+          <div key={item.name} className="pb-6 text-center">
             <Link
+              key={item.name}
               to={item.to}
               smooth={true}
               duration={item.duration}
@@ -1303,9 +1408,11 @@ export default function TopPage() {
           </a>
         ))}
       </div>
-      <p className="mt-10 text-center text-xs leading-5 text-white">
-        Copyright © 2024 リアルポートフォリオ All Rights Reserved.
-      </p>
+      {MyProfile.map((item) => (
+        <p key={item.title} className="mt-10 text-center text-xs leading-5 text-white">
+          {item.footerDescription}
+        </p>
+      ))}
     </div>
   </footer>
 </div>
